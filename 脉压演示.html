@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clinical practice simulation software for low pulse pressure warning</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        #waveform {
+            width: 80%;
+            height: 300px;
+            margin: 20px auto;
+            border: 2px solid #ccc;
+            transition: background-color 0.5s ease;
+        }
+        .container {
+            margin-top: 50px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        .result {
+            margin-top: 20px;
+            font-size: 18px;
+        }
+        #alert {
+            font-size: 24px;
+            color: red;
+            font-weight: bold;
+            display: none;
+        }
+        .input-container {
+            margin-top: 20px;
+        }
+        .input-container input {
+            padding: 5px;
+            font-size: 16px;
+            width: 100px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Clinical practice simulation software for low pulse pressure warning</h1>
+    <div id="alert">Warning : Abnormal pulse pressure value！</div>
+    
+    <!-- 用户输入数据数量和低脉压比例 -->
+    <div class="input-container">
+        <label for="dataCount">Sample：</label>
+        <input type="number" id="dataCount" value="1000" min="100" max="5000">
+        <label for="lowPressureRatio">The proportion of low PP:</label>
+        <input type="number" id="lowPressureRatioInput" value="0.50" min="0" max="1" step="0.01">
+        <label for="interval">Time interval (minutes): </label>
+        <input type="number" id="interval" value="1" min="1" max="60">
+    </div>
+    
+    <div class="container">
+        <canvas id="waveform"></canvas>
+        <p>Current pulse pressure waveform</p>
+        <button onclick="generateNewData()">Generate simulated dataset</button>
+        <button onclick="calculateResults()">Calculation results</button>
+        
+    </div>
+    
+    <div class="result">
+        <p id="timeWeightedAvg">time-weighted average of PP:</p>
+        <p id="lowPressureRatio">The proportion of low PP:</p>
+    </div>
+
+    <script>
+        const canvas = document.getElementById("waveform");
+        const ctx = canvas.getContext("2d");
+
+        let sampleCount = 1000;
+        const threshold = 45;
+        const maxPressure = 80;
+        const minPressure = 30;
+        let alertActive = false;
+        let pressureData = [];
+        let lowPressureRatio = 0;
+
+        // 生成脉压数据
+        function generatePressureData() {
+            pressureData.length = 0; // 清空之前的数据
+            const lowPressureCount = Math.floor(sampleCount * lowPressureRatio);
+
+            // 先生成低脉压数据
+            for (let i = 0; i < lowPressureCount; i++) {
+                pressureData.push(Math.random() * (threshold - minPressure) + minPressure); // < 45mmHg
+            }
+
+            // 然后生成正常脉压数据
+            for (let i = lowPressureCount; i < sampleCount; i++) {
+                pressureData.push(Math.random() * (maxPressure - threshold) + threshold); // >= 45mmHg
+            }
+
+            // 打乱数组顺序，确保数据混合
+            pressureData = pressureData.sort(() => Math.random() - 0.5);
+        }
+
+        // 绘制脉压波形
+        function drawWaveform() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.beginPath();
+            ctx.moveTo(0, canvas.height - pressureData[0]);
+
+            for (let i = 1; i < sampleCount; i++) {
+                ctx.lineTo(i * (canvas.width / sampleCount), canvas.height - pressureData[i]);
+            }
+
+            ctx.strokeStyle = 'red'; // 设置波形颜色为红色
+            ctx.lineWidth = 2;       // 使波形更清晰
+            ctx.stroke();
+        }
+
+        // 计算时间加权平均脉压值
+        function calculateTimeWeightedAverage() {
+            let weightedArea = 0;
+            for (let i = 0; i < sampleCount - 1; i++) {
+                const avgPressure = (pressureData[i] + pressureData[i + 1]) / 2; // 计算每段的平均脉压
+                weightedArea += avgPressure * 1; // 假设时间间隔为1分钟
+            }
+            const totalTime = sampleCount; // 总时间，单位为分钟
+            return weightedArea / totalTime;
+        }
+
+        // 计算低脉压比例（脉压值小于45mmHg的时间比例）
+        function calculateLowPressureRatio() {
+            const lowPressureCount = pressureData.filter(value => value < threshold).length;
+            return lowPressureCount / sampleCount;
+        }
+
+        // 计算并显示结果
+        function calculateResults() {
+            const timeWeightedAvg = calculateTimeWeightedAverage();
+            const lowPressureRatio = calculateLowPressureRatio();
+
+            // 更新显示
+            document.getElementById("timeWeightedAvg").textContent = "脉压时间加权平均值：" + timeWeightedAvg.toFixed(2) + " mmHg";
+            document.getElementById("lowPressureRatio").textContent = "低脉压比例：" + (lowPressureRatio * 100).toFixed(2) + "%";
+
+            // 检查是否需要报警
+            if (lowPressureRatio >= 0.5) {
+                document.getElementById("alert").style.display = "block";
+                resetAlarm(); // 清除之前的报警
+                triggerAlarm('fast'); // 快速闪烁报警
+            } else {
+                document.getElementById("alert").style.display = "none";
+                if (alertActive) {
+                    resetAlarm();
+                }
+                triggerAlarm('slow'); // 慢速闪烁提示正常
+            }
+        }
+
+        // 触发报警，闪烁红色或绿色
+        function triggerAlarm(type) {
+            alertActive = true;
+            const intervalSpeed = type === 'fast' ? 300 : 1000; // 快速闪烁（300ms），慢速闪烁（1000ms）
+
+            const interval = setInterval(() => {
+                if (alertActive) {
+                    canvas.style.backgroundColor = canvas.style.backgroundColor === 'red' 
+                        ? '' : type === 'fast' ? 'red' : 'green'; // 根据报警类型闪烁红色或绿色
+                } else {
+                    clearInterval(interval);
+                }
+            }, intervalSpeed); 
+        }
+
+        // 重置报警
+        function resetAlarm() {
+            alertActive = false;
+            canvas.style.backgroundColor = ''; // 清除背景色
+        }
+
+        // 生成新数据并刷新显示
+        function generateNewData() {
+            sampleCount = parseInt(document.getElementById("dataCount").value);
+            lowPressureRatio = parseFloat(document.getElementById("lowPressureRatioInput").value);
+            generatePressureData();
+            drawWaveform();
+            // 清除之前的计算结果
+            document.getElementById("timeWeightedAvg").textContent = "脉压时间加权平均值：-";
+            document.getElementById("lowPressureRatio").textContent = "低脉压比例：-";
+            document.getElementById("alert").style.display = "none";
+        }
+
+        // 初始化监护仪
+        function initializeMonitor() {
+            generatePressureData();
+            drawWaveform();
+        }
+
+        // 页面加载后初始化一次
+        initializeMonitor();
+    </script>
+
+</body>
+</html>
